@@ -38,3 +38,15 @@ def search_documents(vector_store, question, k=4):
     )
 
     return results
+
+
+def load_existing_vector_store():
+    """Load the existing ChromaDB database."""
+
+    vector_store = Chroma(
+        collection_name="research_paper",
+        embedding_function=embeddings,
+        persist_directory="chroma_db"
+    )
+
+    return vector_store
