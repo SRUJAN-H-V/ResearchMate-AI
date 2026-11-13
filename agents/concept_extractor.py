@@ -1,9 +1,13 @@
 
 from langchain_core.prompts import ChatPromptTemplate
-from core.llm import llm
+
+from core.llm import llm, extract_response_text
 
 
-# Prompt template for concept extraction
+# ==================================================
+# 1. CONCEPT EXTRACTION PROMPT
+# ==================================================
+
 concept_prompt = ChatPromptTemplate.from_messages([
     (
         "system",
@@ -28,7 +32,8 @@ Instructions:
 - Preserve the terminology used in the paper.
 - Do not invent information.
 - If information is unavailable, mention that.
-- Use concise bullet points."""
+- Use concise bullet points.
+- Base your response only on the provided paper content."""
     ),
     (
         "human",
@@ -37,15 +42,24 @@ Instructions:
 ])
 
 
-# Create the LCEL chain
+# ==================================================
+# 2. CONCEPT EXTRACTION CHAIN
+# ==================================================
+
 concept_chain = concept_prompt | llm
 
 
+# ==================================================
+# 3. CONCEPT EXTRACTION FUNCTION
+# ==================================================
+
 def extract_concepts(paper_content):
-    """Extract important concepts from research paper content."""
+
+    if not isinstance(paper_content, str) or not paper_content.strip():
+        raise ValueError("No research paper content provided.")
 
     response = concept_chain.invoke({
         "paper_content": paper_content
     })
 
-    return response.text
+    return extract_response_text(response)

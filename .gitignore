@@ -6,13 +6,16 @@ venv/
 # Python cache
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Environment variables and API keys
 .env
 .env.*
+!.env.example
 
 # ChromaDB local storage
 chroma_db/
+chroma_db_ollama/
 
 # Generated files
 generated/

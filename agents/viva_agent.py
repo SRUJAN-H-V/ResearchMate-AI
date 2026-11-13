@@ -1,10 +1,14 @@
 
 from langchain_core.prompts import ChatPromptTemplate
-from core.llm import llm
 
+from core.llm import llm, extract_response_text
+
+
+# ==================================================
+# 1. VIVA GENERATION PROMPT
+# ==================================================
 
 viva_prompt = ChatPromptTemplate.from_messages([
-
     (
         "system",
         """You are ResearchMate AI's Viva Preparation Agent.
@@ -25,35 +29,35 @@ For each question:
 - Do not invent information.
 - Mention when the paper does not provide an answer.
 
-Example:
+Generate exactly 5 questions for each difficulty level.
 
-Question: What is the main objective of a research paper?
-Answer: To investigate a specific problem or research question
-and present findings supported by evidence.
-
-Now generate viva questions using the provided paper content.
-
-Generate 5 questions for each difficulty level."""
+Use clear headings and number every question."""
     ),
-
     (
         "human",
         "Prepare viva questions and answers from this research paper:\n\n{paper_content}"
     )
-
 ])
 
 
-# Create the LCEL chain
+# ==================================================
+# 2. VIVA GENERATION CHAIN
+# ==================================================
+
 viva_chain = viva_prompt | llm
 
 
+# ==================================================
+# 3. VIVA QUESTION GENERATION FUNCTION
+# ==================================================
+
 def generate_viva_questions(paper_content):
-    """Generate viva questions and answers."""
+
+    if not isinstance(paper_content, str) or not paper_content.strip():
+        raise ValueError("No research paper content provided.")
 
     response = viva_chain.invoke({
         "paper_content": paper_content
     })
 
-    return response.text
-
+    return extract_response_text(response)

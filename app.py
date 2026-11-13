@@ -1,14 +1,11 @@
 
+import hashlib
 import streamlit as st
 
-from core.vector_store import load_existing_vector_store
-from utils.pdf_processor import extract_text_from_pdf_bytes
-from utils.text_chunker import create_chunks
 
-
-# --------------------------------------------------
-# 1. Configure Streamlit Page
-# --------------------------------------------------
+# ==================================================
+# 1. CONFIGURE STREAMLIT PAGE
+# ==================================================
 
 st.set_page_config(
     page_title="ResearchMate AI",
@@ -17,9 +14,72 @@ st.set_page_config(
 )
 
 
-# --------------------------------------------------
-# 2. Application Header
-# --------------------------------------------------
+# ==================================================
+# 2. HELPER FUNCTIONS
+# ==================================================
+
+@st.cache_data(show_spinner="Reading and chunking the PDF...")
+def process_pdf(pdf_bytes):
+
+    from utils.pdf_processor import extract_text_from_pdf_bytes
+    from utils.text_chunker import create_chunks
+
+    pages = extract_text_from_pdf_bytes(pdf_bytes)
+    chunks = create_chunks(pages)
+
+    return pages, chunks
+
+
+def get_pdf_hash(pdf_bytes):
+    """Generate a fingerprint based on PDF contents."""
+
+    return hashlib.sha256(pdf_bytes).hexdigest()[:16]
+
+
+def friendly_error(error):
+    """Convert common errors into readable messages."""
+
+    message = str(error)
+    lower_message = message.lower()
+
+    if "429" in message or "resource_exhausted" in lower_message:
+        return "Gemini quota or rate limit reached. Ollama fallback may also have failed."
+
+    if "503" in message or "unavailable" in lower_message:
+        return "The AI service is temporarily unavailable. Please try again."
+
+    if "504" in message or "deadline_exceeded" in lower_message:
+        return "The AI request timed out. Please try again."
+
+    if "connection refused" in lower_message:
+        return "Could not connect to Ollama. Make sure Ollama is running."
+
+    return message
+
+
+# ==================================================
+# 3. INITIALIZE SESSION STATE
+# ==================================================
+
+defaults = {
+    "vector_store": None,
+    "rag_answer": None,
+    "paper_summary": None,
+    "concept_results": None,
+    "viva_results": None,
+    "paper_hash": None,
+    "index_message": None,
+}
+
+for key, value in defaults.items():
+
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+
+# ==================================================
+# 4. APPLICATION HEADER
+# ==================================================
 
 st.title("📚 ResearchMate AI")
 
@@ -27,16 +87,16 @@ st.subheader("Your AI-powered Research Paper Assistant")
 
 st.write(
     "Upload a research paper to generate summaries, "
-    "extract key concepts, prepare presentations, "
-    "and practice for viva examinations."
+    "extract key concepts, prepare for viva examinations, "
+    "and ask questions using AI-powered document retrieval."
 )
 
 st.divider()
 
 
-# --------------------------------------------------
-# 3. PDF Upload Section
-# --------------------------------------------------
+# ==================================================
+# 5. PDF UPLOAD SECTION
+# ==================================================
 
 st.header("Upload Research Paper")
 
@@ -46,11 +106,27 @@ uploaded_file = st.file_uploader(
 )
 
 
-# --------------------------------------------------
-# 4. Process Uploaded PDF
-# --------------------------------------------------
+# ==================================================
+# 6. PROCESS UPLOADED PDF
+# ==================================================
 
 if uploaded_file is not None:
+
+    pdf_bytes = uploaded_file.getvalue()
+
+    pdf_hash = get_pdf_hash(pdf_bytes)
+
+    # Reset previous results when a different PDF is uploaded.
+    if st.session_state.paper_hash != pdf_hash:
+
+        st.session_state.vector_store = None
+        st.session_state.rag_answer = None
+        st.session_state.paper_summary = None
+        st.session_state.concept_results = None
+        st.session_state.viva_results = None
+        st.session_state.index_message = None
+
+        st.session_state.paper_hash = pdf_hash
 
     st.success("Research paper uploaded successfully!")
 
@@ -63,13 +139,11 @@ if uploaded_file is not None:
 
     try:
 
-        # ------------------------------------------
-        # Step 1: Extract PDF Text
-        # ------------------------------------------
+        # --------------------------------------------------
+        # STEP 1: EXTRACT TEXT AND CREATE CHUNKS
+        # --------------------------------------------------
 
-        pages = extract_text_from_pdf_bytes(
-            uploaded_file.getvalue()
-        )
+        pages, chunks = process_pdf(pdf_bytes)
 
         paper_content = "\n\n".join(
             page["text"] for page in pages
@@ -79,13 +153,10 @@ if uploaded_file is not None:
 
         st.header("Paper Processing Results")
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.metric(
-                "Pages Extracted",
-                len(pages)
-            )
+            st.metric("Pages Extracted", len(pages))
 
         with col2:
             st.metric(
@@ -93,135 +164,318 @@ if uploaded_file is not None:
                 f"{len(paper_content):,}"
             )
 
+        with col3:
+            st.metric("Total Chunks", len(chunks))
+
         st.success(
-            "PDF text extracted successfully!"
+            "PDF text extracted and chunked successfully!"
         )
 
-
-        # ------------------------------------------
-        # Step 2: Preview Extracted Text
-        # ------------------------------------------
+        # --------------------------------------------------
+        # STEP 2: PREVIEW EXTRACTED TEXT AND CHUNKS
+        # --------------------------------------------------
 
         with st.expander("Preview Extracted Text"):
 
             st.text(paper_content[:5000])
 
             if len(paper_content) > 5000:
-
                 st.caption(
                     "Showing the first 5,000 characters."
                 )
-
-
-        # ------------------------------------------
-        # Step 3: Create Text Chunks
-        # ------------------------------------------
-
-        chunks = create_chunks(pages)
-
-        st.divider()
-
-        st.header("Text Chunking Results")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.metric(
-                "Total Chunks",
-                len(chunks)
-            )
-
-        with col2:
-            st.metric(
-                "Chunk Size",
-                "1000 characters"
-            )
-
-        st.success(
-            "Research paper divided into chunks successfully!"
-        )
-
-
-        # ------------------------------------------
-        # Step 4: Preview First Three Chunks
-        # ------------------------------------------
 
         with st.expander("Preview Text Chunks"):
 
             for index, chunk in enumerate(chunks[:3]):
 
-                st.write(
-                    f"**Chunk {index + 1}**"
-                )
+                st.write(f"**Chunk {index + 1}**")
 
                 st.write(
-                    f"Source Page: {chunk.metadata['page']}"
+                    f"Source Page: {chunk.metadata.get('page', 'Unknown')}"
                 )
 
-                st.text(
-                    chunk.page_content
-                )
+                st.text(chunk.page_content)
 
                 st.divider()
 
-
-        # ------------------------------------------
-        # Step 5: Connect to ChromaDB
-        # ------------------------------------------
+        # --------------------------------------------------
+        # STEP 3: INDEX PAPER IN CHROMADB
+        # --------------------------------------------------
 
         st.divider()
 
         st.header("Vector Database")
 
-        if st.button("Connect to ChromaDB"):
+        st.write(
+            "ResearchMate AI uses local Ollama embeddings "
+            "to store and retrieve research paper sections "
+            "in ChromaDB. Each PDF has its own collection."
+        )
 
-            try:
+        if st.button("Index Paper / Connect to ChromaDB"):
 
-                vector_store = load_existing_vector_store()
+            with st.spinner(
+                "Creating local embeddings and connecting to ChromaDB..."
+            ):
 
-                document_count = (
-                    vector_store._collection.count()
-                )
+                try:
 
-                st.session_state.vector_store = vector_store
-
-                st.metric(
-                    "Stored Chunks",
-                    document_count
-                )
-
-                if document_count == len(chunks):
-
-                    st.success(
-                        "ChromaDB connected successfully! "
-                        "Your research paper chunks are available."
+                    from core.vector_store import (
+                        get_or_create_vector_store
                     )
+
+                    vector_store, newly_indexed = (
+                        get_or_create_vector_store(
+                            chunks,
+                            pdf_hash
+                        )
+                    )
+
+                    st.session_state.vector_store = vector_store
+
+                    if newly_indexed:
+
+                        st.session_state.index_message = (
+                            f"Successfully indexed {len(chunks)} chunks "
+                            "using local Ollama embeddings."
+                        )
+
+                    else:
+
+                        st.session_state.index_message = (
+                            f"Reused the existing index containing "
+                            f"{len(chunks)} chunks. "
+                            "No new embeddings were required."
+                        )
+
+                except Exception as error:
+
+                    st.session_state.vector_store = None
+
+                    st.error(
+                        "Indexing failed: "
+                        f"{friendly_error(error)}"
+                    )
+
+        if (
+            st.session_state.vector_store is not None
+            and st.session_state.index_message
+        ):
+
+            st.success(st.session_state.index_message)
+
+        # --------------------------------------------------
+        # STEP 4: RESEARCH PAPER SUMMARIZER
+        # --------------------------------------------------
+
+        st.divider()
+
+        st.header("Research Paper Summary")
+
+        st.write(
+            "Generate a structured summary of your "
+            "uploaded research paper."
+        )
+
+        if st.button("Generate Research Paper Summary"):
+
+            with st.spinner(
+                "Summarizing the research paper..."
+            ):
+
+                try:
+
+                    from agents.summarizer import summarize_paper
+
+                    summary = summarize_paper(paper_content)
+
+                    st.session_state.paper_summary = summary
+
+                except Exception as error:
+
+                    st.error(
+                        "Unable to generate summary: "
+                        f"{friendly_error(error)}"
+                    )
+
+        if st.session_state.paper_summary:
+
+            st.subheader("Generated Summary")
+
+            st.markdown(
+                st.session_state.paper_summary
+            )
+
+        # --------------------------------------------------
+        # STEP 5: CONCEPT EXTRACTION
+        # --------------------------------------------------
+
+        st.divider()
+
+        st.header("Key Concept Extraction")
+
+        st.write(
+            "Extract important concepts, technical terms, "
+            "algorithms, methodology and findings."
+        )
+
+        if st.button("Extract Key Concepts"):
+
+            with st.spinner(
+                "Extracting concepts from the research paper..."
+            ):
+
+                try:
+
+                    from agents.concept_extractor import extract_concepts
+
+                    concepts = extract_concepts(paper_content)
+
+                    st.session_state.concept_results = concepts
+
+                except Exception as error:
+
+                    st.error(
+                        "Unable to extract concepts: "
+                        f"{friendly_error(error)}"
+                    )
+
+        if st.session_state.concept_results:
+
+            st.subheader("Extracted Concepts")
+
+            st.markdown(
+                st.session_state.concept_results
+            )
+
+        # --------------------------------------------------
+        # STEP 6: VIVA PREPARATION
+        # --------------------------------------------------
+
+        st.divider()
+
+        st.header("Viva Preparation")
+
+        st.write(
+            "Generate easy, medium and difficult viva "
+            "questions with answers based on your research paper."
+        )
+
+        if st.button("Generate Viva Questions"):
+
+            with st.spinner(
+                "Preparing viva questions and answers..."
+            ):
+
+                try:
+
+                    from agents.viva_agent import generate_viva_questions
+
+                    viva = generate_viva_questions(paper_content)
+
+                    st.session_state.viva_results = viva
+
+                except Exception as error:
+
+                    st.error(
+                        "Unable to generate viva questions: "
+                        f"{friendly_error(error)}"
+                    )
+
+        if st.session_state.viva_results:
+
+            st.subheader("Generated Viva Questions")
+
+            st.markdown(
+                st.session_state.viva_results
+            )
+
+        # --------------------------------------------------
+        # STEP 7: CHAT WITH RESEARCH PAPER (RAG)
+        # --------------------------------------------------
+
+        st.divider()
+
+        st.header("Chat with Research Paper")
+
+        st.write(
+            "Ask questions about your uploaded research paper. "
+            "ResearchMate AI retrieves relevant sections from "
+            "ChromaDB and generates an answer."
+        )
+
+        if st.session_state.vector_store is not None:
+
+            with st.form("research_question_form"):
+
+                user_question = st.text_input(
+                    "Enter your question",
+                    placeholder="What is the main objective of this paper?"
+                )
+
+                submit_question = st.form_submit_button(
+                    "Ask ResearchMate AI"
+                )
+
+            if submit_question:
+
+                if user_question.strip():
+
+                    with st.spinner(
+                        "Searching the research paper and generating an answer..."
+                    ):
+
+                        try:
+
+                            from core.rag_chain import answer_question
+
+                            response = answer_question(
+                                st.session_state.vector_store,
+                                user_question
+                            )
+
+                            st.session_state.rag_answer = response
+
+                        except Exception as error:
+
+                            st.error(
+                                "Unable to generate answer: "
+                                f"{friendly_error(error)}"
+                            )
 
                 else:
 
-                    st.warning(
-                        f"Database contains {document_count} chunks, "
-                        f"but the uploaded paper has {len(chunks)} chunks. "
-                        "The database may contain a different paper."
-                    )
+                    st.warning("Please enter a question.")
 
-            except Exception as error:
+            if st.session_state.rag_answer:
 
-                st.error(
-                    f"ChromaDB connection failed: {error}"
+                st.subheader("Answer")
+
+                st.markdown(
+                    st.session_state.rag_answer
                 )
 
+        else:
+
+            st.info(
+                "Please click 'Index Paper / Connect to ChromaDB' "
+                "before using the research paper chat."
+            )
 
     except Exception as error:
 
         st.error(
-            f"PDF processing failed: {error}"
+            f"PDF processing failed: {friendly_error(error)}"
         )
 
+else:
 
-# --------------------------------------------------
-# 6. Footer
-# --------------------------------------------------
+    st.info("Upload a research paper PDF to get started.")
+
+
+# ==================================================
+# 7. FOOTER
+# ==================================================
 
 st.divider()
 
