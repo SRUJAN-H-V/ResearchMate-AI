@@ -1,46 +1,92 @@
-import sys
-from pathlib import Path
 
-# Add project root to Python import path
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PROJECT_ROOT))
-from utils.pdf_processor import extract_text_from_pdf
+import core.vector_store as vector_store_module
+
 from utils.text_chunker import create_chunks
-from core.vector_store import create_vector_store, search_documents
+from core.vector_store import (
+    create_vector_store,
+    search_documents
+)
 
 
-def main():
-    # Step 1: Extract PDF text
-    pages = extract_text_from_pdf("sample_paper.pdf")
+# Sample research paper content
+sample_pages = [
+    {
+        "page": 1,
+        "text": """
+        Artificial Intelligence is transforming higher education.
 
-    # Step 2: Create chunks
-    chunks = create_chunks(pages)
+        Students use AI tools for summarization, idea generation,
+        writing assistance and understanding complex topics.
 
-    print("Total chunks:", len(chunks))
+        Faculty members have concerns about academic integrity,
+        plagiarism and the impact of AI on critical thinking.
 
-    # Step 3: Store chunks in ChromaDB
-    print("\nCreating vector database...")
+        Universities need institutional policies and AI awareness
+        programs to encourage responsible AI usage.
+        """
+    },
+    {
+        "page": 2,
+        "text": """
+        The research investigates the perspectives of faculty
+        members and students regarding artificial intelligence.
 
-    vector_store = create_vector_store(chunks)
+        The study highlights the importance of responsible AI
+        adoption, educational policies and faculty training.
+        """
+    }
+]
 
-    print("Vector database created successfully!")
 
-    # Step 4: Search for relevant information
-    question = (
-        "What are the perspectives of faculty and students "
-        "on artificial intelligence in higher education?"
+def test_vector_store_creation_and_search(tmp_path, monkeypatch):
+
+    # Step 1: Use a temporary database directory.
+    monkeypatch.setattr(
+        vector_store_module,
+        "PERSIST_DIRECTORY",
+        str(tmp_path)
     )
 
-    print("\nSearching for:", question)
+    # Step 2: Create text chunks.
+    chunks = create_chunks(sample_pages)
 
-    results = search_documents(vector_store, question)
+    assert len(chunks) > 0
 
-    # Step 5: Display retrieved results
+    print("\nTotal chunks:", len(chunks))
+
+    # Step 3: Store chunks in ChromaDB.
+    vector_store = create_vector_store(
+        chunks,
+        collection_name="pytest_research_paper"
+    )
+
+    assert vector_store is not None
+
+    print("\nChromaDB created successfully!")
+
+    # Step 4: Search for relevant information.
+    question = (
+        "How do students and faculty members "
+        "view artificial intelligence in education?"
+    )
+
+    results = search_documents(
+        vector_store,
+        question,
+        k=4
+    )
+
+    # Step 5: Verify search results.
+    assert len(results) > 0
+
+    print("\nSearch results:")
+
     for i, result in enumerate(results, start=1):
+
         print(f"\n--- Result {i} ---")
         print("Source page:", result.metadata["page"])
-        print(result.page_content[:500])
+        print(result.page_content[:300])
 
-
-if __name__ == "__main__":
-    main()
+    # Step 6: Verify page metadata.
+    for result in results:
+        assert "page" in result.metadata

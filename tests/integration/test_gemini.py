@@ -1,25 +1,25 @@
 
 import time
+
 from core.llm import test_gemini as run_gemini_check
 
 
-def main():
-    start = time.time()
+def test_gemini_connection():
 
-    print("Sending request to Gemini...")
+    start = time.perf_counter()
 
-    try:
-        result = run_gemini_check()
+    print("\nSending request to Gemini...")
 
-        print("\nGemini Response:\n")
-        print(result)
+    # Make a real Gemini API request
+    result = run_gemini_check()
 
-    except Exception as e:
-        print("Error:", e)
+    elapsed_time = time.perf_counter() - start
 
-    finally:
-        print(f"\nTotal time: {time.time() - start:.2f} seconds")
+    print("\nGemini Response:\n")
+    print(result)
 
+    print(f"\nTotal time: {elapsed_time:.2f} seconds")
 
-if __name__ == "__main__":
-    main()
+    # Verify that Gemini returned a valid response
+    assert isinstance(result, str)
+    assert len(result.strip()) > 0
